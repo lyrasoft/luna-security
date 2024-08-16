@@ -164,7 +164,7 @@ class DbExcelCommand implements CommandInterface
 
         $excel->setActiveSheet(0);
 
-        $excel->save($outputName, 'xlsx');
+        $excel->save($output, 'xlsx');
 
         $io->writeln('[Export to] ' . $output);
 
