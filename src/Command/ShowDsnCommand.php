@@ -17,7 +17,7 @@ use Windwalker\Utilities\Str;
 use function Windwalker\fs;
 
 #[CommandWrapper(
-    description: ''
+    description: 'Show DB Connection params as DSN and stripes from env file.'
 )]
 class ShowDsnCommand implements CommandInterface
 {

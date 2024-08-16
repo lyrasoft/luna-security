@@ -20,7 +20,7 @@ use Windwalker\Filesystem\Path;
 use Windwalker\Utilities\Utf8String;
 
 #[CommandWrapper(
-    description: ''
+    description: 'Export DN Schema to Excel file.'
 )]
 class DbExcelCommand implements CommandInterface
 {
