@@ -135,7 +135,7 @@ class DbExcelCommand implements CommandInterface
 
             $worksheet->freezePane('B2');
 
-            $excel->addColumn('table', 'Table');
+            $excel->addColumn('table', 'Table')->setWidth(20);
             $excel->addColumn('type', 'Type')->setWidth(15);
             $excel->addColumn('nullable', 'Nullable');
             $excel->addColumn('key', 'Key');
