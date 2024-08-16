@@ -1,0 +1,31 @@
+{
+    "name": "lyrasoft/security",
+    "description": "LYRASOFT Secutity Package",
+    "type": "windwalker-package",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Lyrasoft\\Security\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Simon Asika",
+            "email": "asika32764@gmail.com"
+        }
+    ],
+    "minimum-stability": "beta",
+    "require": {
+        "php": ">=8.2",
+        "windwalker/core": "^4.1"
+    },
+    "extra": {
+        "windwalker":{
+            "packages": [
+                "Lyrasoft\\Security\\SecurityPackage"
+            ],
+            "modules": [
+            ]
+        }
+    }
+}
