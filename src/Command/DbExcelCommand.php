@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Lyrasoft\Security\Command;
 
+use Lyrasoft\Security\SecurityPackage;
 use Lyrasoft\Toolkit\Spreadsheet\PhpSpreadsheetWriter;
 use Lyrasoft\Toolkit\Spreadsheet\SpreadsheetKit;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -15,6 +17,8 @@ use Windwalker\Console\CommandWrapper;
 use Windwalker\Console\IOInterface;
 use Windwalker\Core\Application\ApplicationInterface;
 use Windwalker\Core\Manager\DatabaseManager;
+use Windwalker\Database\DatabaseAdapter;
+use Windwalker\Database\Schema\Ddl\Column;
 use Windwalker\Filesystem\Filesystem;
 use Windwalker\Filesystem\Path;
 use Windwalker\Utilities\Utf8String;
@@ -59,6 +63,13 @@ class DbExcelCommand implements CommandInterface
             'Use default language',
             'en-US'
         );
+
+        $command->addOption(
+            'as-schema',
+            's',
+            InputOption::VALUE_NONE,
+            'Export as LYRASOFY Schema template',
+        );
     }
 
     /**
@@ -71,6 +82,7 @@ class DbExcelCommand implements CommandInterface
     public function execute(IOInterface $io): int
     {
         $output = $io->getArgument('output');
+        $asSchema = (bool) $io->getOption('as-schema');
         $outputName = sprintf(
             'DbSchema-%s.xlsx',
             $this->app->getAppName(),
@@ -96,69 +108,80 @@ class DbExcelCommand implements CommandInterface
         $db = $this->databaseManager->get($conn);
 
         $excel = SpreadsheetKit::createPhpSpreadsheetWriter();
-        /** @var Worksheet $sheet */
-        $sheet = $excel->setActiveSheet(0);
-        $sheet->setTitle('Summary');
-        $sheet->freezePane('A2');
 
-        $excel->addColumn('table', 'Table')->setWidth(15);
-        $excel->addColumn('desc', 'Description')->setWidth(25);
-        $tables = $db->getSchema()->getTables();
+        if ($asSchema) {
+            $tmpl = SecurityPackage::path('resources/data/table-schema-example.xlsx');
 
-        foreach ($tables as $table) {
-            $excel->addRow(
-                function (PhpSpreadsheetWriter $row) use ($useDefDesc, $table) {
-                    $desc = '';
+            $spreadsheet = IOFactory::load($tmpl);
 
-                    if ($useDefDesc) {
-                        $desc = $this->handleTableDescription($table->tableName, $useDefDesc);
-                    }
+            $excel->setCreateDriverHandler(fn() => $spreadsheet);
 
-                    $row->setRowCell('table', $table->tableName);
-                    $row->setRowCell('desc', $desc);
-                }
-            );
-        }
+            $this->exportAsSchemaTemplate($excel, $db, $io);
+        } else {
+            /** @var Worksheet $sheet */
+            $sheet = $excel->setActiveSheet(0);
+            $sheet->setTitle('Summary');
+            $sheet->freezePane('A2');
 
-        foreach ($tables as $table) {
-            $query = $db->createQuery();
-            $query->sql(
-                $query->format(
-                    "SHOW FULL COLUMNS FROM %n",
-                    $table->tableName
-                )
-            );
-            $columns = $query->all();
+            $excel->addColumn('name', 'Name')->setWidth(15);
+            $excel->addColumn('desc', 'Description')->setWidth(25);
+            $tables = $db->getSchemaManager()->getTables();
 
-            /** @var Worksheet $worksheet */
-            $worksheet = $excel->setActiveSheet($table->tableName);
-
-            $worksheet->freezePane('B2');
-
-            $excel->addColumn('table', 'Table')->setWidth(20);
-            $excel->addColumn('type', 'Type')->setWidth(15);
-            $excel->addColumn('nullable', 'Nullable');
-            $excel->addColumn('key', 'Key');
-            $excel->addColumn('description', 'Description')->setWidth(30);
-
-            foreach ($columns as $column) {
+            foreach ($tables as $table) {
                 $excel->addRow(
-                    function (PhpSpreadsheetWriter $row) use ($useDefDesc, $column) {
-                        $row->setRowCell('table', $column->Field);
-                        $row->setRowCell('type', $column->Type);
-                        $row->setRowCell('nullable', $column->Null);
-                        $row->setRowCell('key', $column->Key);
-
-                        $desc = $column->Comment;
+                    function (PhpSpreadsheetWriter $row) use ($useDefDesc, $table) {
+                        $desc = '';
 
                         if ($useDefDesc) {
-                            $desc = $this->handleDefaultColumnDescription($column->Field, $useDefDesc)
-                                ?: $column->Comment;
+                            $desc = $this->handleTableDescription($table->tableName, $useDefDesc);
                         }
 
-                        $row->setRowCell('description', $desc);
+                        $row->setRowCell('name', $table->tableName);
+                        $row->setRowCell('desc', $desc);
                     }
                 );
+            }
+
+            foreach ($tables as $table) {
+                $query = $db->createQuery();
+                $query->sql(
+                    $query->format(
+                        "SHOW FULL COLUMNS FROM %n",
+                        $table->tableName
+                    )
+                );
+                $columns = $query->all();
+
+                /** @var Worksheet $worksheet */
+                $worksheet = $excel->setActiveSheet($table->tableName);
+
+                $worksheet->freezePane('B2');
+
+                $excel->addColumn('name', 'name')->setWidth(20);
+                $excel->addColumn('type', 'Type')->setWidth(15);
+                $excel->addColumn('nullable', 'Nullable');
+                $excel->addColumn('key', 'Key');
+                $excel->addColumn('description', 'Description')->setWidth(30);
+
+                foreach ($columns as $column) {
+                    $excel->addRow(
+                        function (PhpSpreadsheetWriter $row) use ($useDefDesc, $column) {
+                            $row->setRowCell('name', $column->Field);
+                            $row->setRowCell('type', $column->Type);
+                            $row->setRowCell('nullable', $column->Null);
+                            $row->setRowCell('key', $column->Key);
+
+                            $desc = $column->Comment;
+
+                            if ($useDefDesc) {
+                                $desc = $this->handleDefaultColumnDescription($column->Field, $useDefDesc)
+                                    ?: $column->Comment;
+                            }
+
+                            $row->setRowCell('description', $desc);
+                        }
+                    );
+                }
             }
         }
 
@@ -169,6 +192,154 @@ class DbExcelCommand implements CommandInterface
         $io->writeln('[Export to] ' . $output);
 
         return 0;
+    }
+
+    protected function exportAsSchemaTemplate(
+        PhpSpreadsheetWriter $excel,
+        DatabaseAdapter $db,
+        IOInterface $io
+    ) {
+        ini_set('memory_limit', '3G');
+
+        $spreadsheet = $excel->getDriver();
+        $useDefDesc = $io->getOption('def-lang');
+
+        $tables = $db->getSchemaManager()->getTables();
+
+        foreach ($tables as $table) {
+            $sheet = clone $spreadsheet->getSheetByName('_Sample');
+            $sheet->setTitle($table->tableName);
+            $spreadsheet->addSheet($sheet);
+
+            /** @var Worksheet $worksheet */
+            $worksheet = $excel->setActiveSheet($table->tableName);
+
+            $columns = $db->getTableManager($table->tableName)->getColumns(true, true);
+
+            $worksheet->freezePane('B2');
+
+            $excel->addColumn('name', 'Name')->setWidth(25);
+            $excel->addColumn('type', 'Type');
+            $excel->addColumn('length', 'Length');
+            $excel->addColumn('nullable', 'NULL');
+            $excel->addColumn('signed', 'Signed');
+            $excel->addColumn('default', 'Default');
+            $excel->addColumn('relation', 'Relation');
+            $excel->addColumn('key', 'Key');
+            $excel->addColumn('key_name', 'Key Name');
+            $excel->addColumn('description', 'Description');
+            $excel->addColumn('note', 'Note');
+
+            foreach ($columns as $column) {
+                $excel->addRow(
+                    function (PhpSpreadsheetWriter $row) use ($useDefDesc, $column) {
+                        $row->setRowCell('name', $column->columnName);
+                        $row->setRowCell('type', $this->getDataTypeValue($column));
+                        $row->setRowCell('length', $this->getLengthValue($column));
+                        $row->setRowCell('nullable', $column->getIsNullable() ? 'Allow' : null);
+                        $row->setRowCell('signed', $column->getNumericUnsigned() ? 'Unsigned' : null);
+                        $row->setRowCell('default', $this->getDefaultValue($column));
+                        $row->setRowCell('key', $this->getKeyOptionValue($column));
+
+                        $desc = $column->getComment();
+
+                        if ($useDefDesc) {
+                            $desc = $this->handleDefaultColumnDescription($column->columnName, $useDefDesc)
+                                ?: $column->getComment();
+                        }
+
+                        $row->setRowCell('description', $desc);
+                    }
+                );
+            }
+        }
+    }
+
+    protected function getDataTypeValue(Column $column): string
+    {
+        $type = $column->getDataType();
+
+        if ($type === 'tinyint' && (string) $column->getErratas()['custom_length'] === '1') {
+            return 'bool';
+        }
+
+        return $type;
+    }
+
+    protected function getLengthValue(Column $column): ?string
+    {
+        $length = $column->getLengthExpression();
+        $type = $column->getDataType();
+
+        if (
+            in_array(
+                $type,
+                [
+                    'int',
+                    'bigint',
+                    'tinyint',
+                    'text',
+                    'mediumtext',
+                    'longtext',
+                    'date',
+                    'datetime',
+                    'timestamp',
+                    'time',
+                    'year',
+                    'blob',
+                ],
+                true
+            )
+        ) {
+            return null;
+        }
+
+        if ($type === 'varchar' && $length === '255') {
+            return null;
+        }
+
+        if ($type === 'char' && $length === '255') {
+            return null;
+        }
+
+        return $length;
+    }
+
+    protected function getDefaultValue(Column $column): ?string
+    {
+        $type = $column->getDataType();
+        // $length = $column->getLengthExpression();
+        $def = (string) $column->getColumnDefault();
+
+        if (
+            $def === '0'
+            && in_array($type, ['int', 'bigint', 'tinyint', 'bool', 'decimal', 'float', 'double'])
+        ) {
+            return null;
+        }
+
+        return $def;
+    }
+
+    protected function getKeyOptionValue(Column $column): ?string
+    {
+        if ($column->isPrimary()) {
+            if ($column->isAutoIncrement()) {
+                return 'Primary (AI)';
+            }
+
+            return 'Primary';
+        }
+
+        if (array_any($column->constraints, fn($constraint) => $constraint->isUnique())) {
+            return 'Unique';
+        }
+
+        if (count($column->indexes)) {
+            return 'Index';
+        }
+
+        return null;
     }
 
     protected function handleDefaultColumnDescription(string $columnName, string $useDefDesc): string
@@ -289,7 +460,7 @@ class DbExcelCommand implements CommandInterface
             'sitename' => '網站名稱',
             default => '',
         };
-}
+    }
 
     /**
      * @param  string  $columnName
