@@ -9,8 +9,13 @@ use Lyrasoft\Toolkit\Spreadsheet\PhpSpreadsheetWriter;
 use Lyrasoft\Toolkit\Spreadsheet\SpreadsheetKit;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use Stecman\Component\Symfony\Console\BashCompletion\Completion\CompletionAwareInterface;
+use Stecman\Component\Symfony\Console\BashCompletion\CompletionContext;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputDefinition;
 use Symfony\Component\Console\Input\InputOption;
 use Windwalker\Console\CommandInterface;
 use Windwalker\Console\CommandWrapper;
@@ -21,13 +26,18 @@ use Windwalker\Database\DatabaseAdapter;
 use Windwalker\Database\Schema\Ddl\Column;
 use Windwalker\Filesystem\Filesystem;
 use Windwalker\Filesystem\Path;
+use Windwalker\Utilities\Arr;
 use Windwalker\Utilities\Utf8String;
+
+use function Windwalker\ds;
 
 #[CommandWrapper(
     description: 'Export DN Schema to Excel file.'
 )]
-class DbExcelCommand implements CommandInterface
+class DbExcelCommand implements CommandInterface, CompletionAwareInterface
 {
+    private InputDefinition $definition;
+
     public function __construct(protected DatabaseManager $databaseManager, protected ApplicationInterface $app)
     {
     }
@@ -42,8 +52,16 @@ class DbExcelCommand implements CommandInterface
     public function configure(Command $command): void
     {
         $command->addArgument(
+            'tables',
+            InputArgument::IS_ARRAY,
+            'The db table to export',
+            null
+        );
+
+        $command->addOption(
             'output',
-            InputArgument::OPTIONAL,
+            'o',
+            InputOption::VALUE_REQUIRED,
             'The output path',
             null
         );
@@ -70,6 +88,8 @@ class DbExcelCommand implements CommandInterface
             InputOption::VALUE_NONE,
             'Export as LYRASOFY Schema template',
         );
+
+        $this->definition = $command->getDefinition();
     }
 
     /**
@@ -81,8 +101,9 @@ class DbExcelCommand implements CommandInterface
      */
     public function execute(IOInterface $io): int
     {
-        $output = $io->getArgument('output');
+        $output = $io->getOption('output');
         $asSchema = (bool) $io->getOption('as-schema');
+        $tables = (array) $io->getArgument('tables');
         $outputName = sprintf(
             'DbSchema-%s.xlsx',
             $this->app->getAppName(),
@@ -564,5 +585,30 @@ class DbExcelCommand implements CommandInterface
         return match ($tableName) {
             default => '',
         };
+    }
+
+    public function completeOptionValues($optionName, CompletionContext $context)
+    {
+        //
+    }
+
+    public function completeArgumentValues($argumentName, CompletionContext $context)
+    {
+        if ($argumentName === 'tables') {
+            $words = $context->getWords();
+            array_shift($words);
+            $input = new ArgvInput($words, $this->definition);
+
+            $tables = $input->getArgument('tables');
+            $tables = array_filter($tables, fn ($t) => $t !== '');
+
+            $conn = $input->getOption('connection') ?: null;
+
+            $db = $this->databaseManager->get($conn);
+
+            $dbTables = array_keys($db->getSchemaManager()->getTables(refresh: true));
+
+            return array_values(array_diff($dbTables, $tables));
+        }
     }
 }
