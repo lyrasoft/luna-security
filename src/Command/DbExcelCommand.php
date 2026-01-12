@@ -103,7 +103,7 @@ class DbExcelCommand implements CommandInterface, CompletionAwareInterface
     {
         $output = $io->getOption('output');
         $asSchema = (bool) $io->getOption('as-schema');
-        $tables = (array) $io->getArgument('tables');
+        $allowTables = (array) $io->getArgument('tables');
         $outputName = sprintf(
             'DbSchema-%s.xlsx',
             $this->app->getAppName(),
@@ -149,6 +149,10 @@ class DbExcelCommand implements CommandInterface, CompletionAwareInterface
             $tables = $db->getSchemaManager()->getTables();
 
             foreach ($tables as $table) {
+                if ($allowTables && !in_array($table->tableName, $allowTables, true)) {
+                    continue;
+                }
+
                 $excel->addRow(
                     function (PhpSpreadsheetWriter $row) use ($useDefDesc, $table) {
                         $desc = '';
@@ -164,6 +168,10 @@ class DbExcelCommand implements CommandInterface, CompletionAwareInterface
             }
 
             foreach ($tables as $table) {
+                if ($allowTables && !in_array($table->tableName, $allowTables, true)) {
+                    continue;
+                }
+
                 $query = $db->createQuery();
                 $query->sql(
                     $query->format(
@@ -225,9 +233,14 @@ class DbExcelCommand implements CommandInterface, CompletionAwareInterface
         $spreadsheet = $excel->getDriver();
         $useDefDesc = $io->getOption('def-lang');
 
+        $allowTables = (array) $io->getArgument('tables');
         $tables = $db->getSchemaManager()->getTables();
 
         foreach ($tables as $table) {
+            if ($allowTables && !in_array($table->tableName, $allowTables, true)) {
+                continue;
+            }
+
             $sheet = clone $spreadsheet->getSheetByName('_Sample');
             $sheet->setTitle($table->tableName);
             $spreadsheet->addSheet($sheet);
