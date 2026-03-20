@@ -9,6 +9,8 @@ use Lyrasoft\Toolkit\Spreadsheet\PhpSpreadsheetWriter;
 use Lyrasoft\Toolkit\Spreadsheet\SpreadsheetKit;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use Stecman\Component\Symfony\Console\BashCompletion\Completion\CompletionAwareInterface;
+use Stecman\Component\Symfony\Console\BashCompletion\CompletionContext;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
@@ -23,10 +25,12 @@ use Windwalker\Filesystem\Filesystem;
 use Windwalker\Filesystem\Path;
 use Windwalker\Utilities\Utf8String;
 
+use function Windwalker\ds;
+
 #[CommandWrapper(
     description: 'Export DN Schema to Excel file.'
 )]
-class DbExcelCommand implements CommandInterface
+class DbExcelCommand implements CommandInterface, CompletionAwareInterface
 {
     public function __construct(protected DatabaseManager $databaseManager, protected ApplicationInterface $app)
     {
@@ -42,8 +46,15 @@ class DbExcelCommand implements CommandInterface
     public function configure(Command $command): void
     {
         $command->addArgument(
+            'tables',
+            InputArgument::IS_ARRAY,
+            'The table names to export.'
+        );
+
+        $command->addOption(
             'output',
-            InputArgument::OPTIONAL,
+            '0',
+            InputOption::VALUE_REQUIRED,
             'The output path',
             null
         );
@@ -81,7 +92,8 @@ class DbExcelCommand implements CommandInterface
      */
     public function execute(IOInterface $io): int
     {
-        $output = $io->getArgument('output');
+        $chooseTables = $io->getArgument('tables');
+        $output = $io->getOption('output');
         $asSchema = (bool) $io->getOption('as-schema');
         $outputName = sprintf(
             'DbSchema-%s.xlsx',
@@ -98,8 +110,6 @@ class DbExcelCommand implements CommandInterface
 
         if (is_dir($output)) {
             $output .= '/' . $outputName;
-        } else {
-            $outputName = Path::getFilename($output);
         }
 
         $output = Path::realpath($output);
@@ -128,6 +138,10 @@ class DbExcelCommand implements CommandInterface
             $tables = $db->getSchemaManager()->getTables();
 
             foreach ($tables as $table) {
+                if ($chooseTables && !in_array($table->tableName, $chooseTables, true)) {
+                    continue;
+                }
+
                 $excel->addRow(
                     function (PhpSpreadsheetWriter $row) use ($useDefDesc, $table) {
                         $desc = '';
@@ -143,6 +157,10 @@ class DbExcelCommand implements CommandInterface
             }
 
             foreach ($tables as $table) {
+                if ($chooseTables && !in_array($table->tableName, $chooseTables, true)) {
+                    continue;
+                }
+
                 $query = $db->createQuery();
                 $query->sql(
                     $query->format(
@@ -201,12 +219,18 @@ class DbExcelCommand implements CommandInterface
     ) {
         ini_set('memory_limit', '3G');
 
-        $spreadsheet = $excel->getDriver();
+        $chooseTables = $io->getArgument('tables');
         $useDefDesc = $io->getOption('def-lang');
+
+        $spreadsheet = $excel->getDriver();
 
         $tables = $db->getSchemaManager()->getTables();
 
         foreach ($tables as $table) {
+            if ($chooseTables && !in_array($table->tableName, $chooseTables, true)) {
+                continue;
+            }
+
             $sheet = clone $spreadsheet->getSheetByName('_Sample');
             $sheet->setTitle($table->tableName);
             $spreadsheet->addSheet($sheet);
@@ -564,5 +588,33 @@ class DbExcelCommand implements CommandInterface
         return match ($tableName) {
             default => '',
         };
+    }
+
+    public function completeOptionValues($optionName, CompletionContext $context)
+    {
+    }
+
+    public function completeArgumentValues($argumentName, CompletionContext $context)
+    {
+        if ($argumentName === 'tables') {
+            $words = $context->getWords();
+
+            if (false !== $i = array_search('--connection', $words, true)) {
+                $conn = $context->getWordAtIndex($i + 1);
+            } elseif (false !== $i = array_search('-c', $words, true)) {
+                $conn = $context->getWordAtIndex($i + 1);
+            } else {
+                $conn = null;
+            }
+
+            $db = $this->databaseManager->get($conn);
+
+            $tables = $db->getSchemaManager()->getTables();
+
+            return array_map(
+                fn($table) => $table->tableName,
+                $tables
+            );
+        }
     }
 }
