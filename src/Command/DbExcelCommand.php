@@ -12,7 +12,10 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use Stecman\Component\Symfony\Console\BashCompletion\Completion\CompletionAwareInterface;
 use Stecman\Component\Symfony\Console\BashCompletion\CompletionContext;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputDefinition;
 use Symfony\Component\Console\Input\InputOption;
 use Windwalker\Console\CommandInterface;
 use Windwalker\Console\CommandWrapper;
@@ -23,6 +26,7 @@ use Windwalker\Database\DatabaseAdapter;
 use Windwalker\Database\Schema\Ddl\Column;
 use Windwalker\Filesystem\Filesystem;
 use Windwalker\Filesystem\Path;
+use Windwalker\Utilities\Arr;
 use Windwalker\Utilities\Utf8String;
 
 use function Windwalker\ds;
@@ -32,6 +36,8 @@ use function Windwalker\ds;
 )]
 class DbExcelCommand implements CommandInterface, CompletionAwareInterface
 {
+    private InputDefinition $definition;
+
     public function __construct(protected DatabaseManager $databaseManager, protected ApplicationInterface $app)
     {
     }
@@ -81,6 +87,8 @@ class DbExcelCommand implements CommandInterface, CompletionAwareInterface
             InputOption::VALUE_NONE,
             'Export as LYRASOFY Schema template',
         );
+
+        $this->definition = $command->getDefinition();
     }
 
     /**
@@ -95,6 +103,7 @@ class DbExcelCommand implements CommandInterface, CompletionAwareInterface
         $chooseTables = $io->getArgument('tables');
         $output = $io->getOption('output');
         $asSchema = (bool) $io->getOption('as-schema');
+        $allowTables = (array) $io->getArgument('tables');
         $outputName = sprintf(
             'DbSchema-%s.xlsx',
             $this->app->getAppName(),
@@ -599,22 +608,19 @@ class DbExcelCommand implements CommandInterface, CompletionAwareInterface
         if ($argumentName === 'tables') {
             $words = $context->getWords();
 
-            if (false !== $i = array_search('--connection', $words, true)) {
-                $conn = $context->getWordAtIndex($i + 1);
-            } elseif (false !== $i = array_search('-c', $words, true)) {
-                $conn = $context->getWordAtIndex($i + 1);
-            } else {
-                $conn = null;
-            }
+            array_shift($words);
+            $input = new ArgvInput($words, $this->definition);
+
+            $tables = $input->getArgument('tables');
+            $tables = array_filter($tables, fn ($t) => $t !== '');
+
+            $conn = $input->getOption('connection') ?: null;
 
             $db = $this->databaseManager->get($conn);
 
-            $tables = $db->getSchemaManager()->getTables();
+            $dbTables = array_keys($db->getSchemaManager()->getTables(refresh: true));
 
-            return array_map(
-                fn($table) => $table->tableName,
-                $tables
-            );
+            return array_values(array_diff($dbTables, $tables));
         }
     }
 }
